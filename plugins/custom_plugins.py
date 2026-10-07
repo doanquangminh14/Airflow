@@ -13,11 +13,10 @@ Mục tiêu bài học:
 
 import logging
 import time
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Sequence
 
 from airflow.hooks.base import BaseHook
 from airflow.models.baseoperator import BaseOperator, BaseOperatorLink
-from airflow.models.taskinstance import TaskInstance
 from airflow.plugins_manager import AirflowPlugin
 
 logger = logging.getLogger("airflow.plugins.audit")
