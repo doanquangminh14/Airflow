@@ -12,23 +12,40 @@ Module này bao quát các kỹ thuật truyền nhận dữ liệu giữa các 
 
 ---
 
-## 📂 Danh Sách Files & Chi Tiết Triển Khai
+## 🏗️ Sơ Đồ Phân Nhánh & Dynamic Task Mapping
 
-| File | Mô Tả & Khái Niệm Chính |
-| :--- | :--- |
-| [`01_xcom_data_sharing.py`](file:///c:/Users/Minh%20Doan/repo_github/Airflow/dags/03_data_passing_and_branching/01_xcom_data_sharing.py) | Đẩy và kéo dữ liệu qua `ti.xcom_push(key, value)` và `ti.xcom_pull(task_ids, key)`. Thể hiện mô hình Producer -> Consumer cho metadata & metrics. |
-| [`02_variables_connections.py`](file:///c:/Users/Minh%20Doan/repo_github/Airflow/dags/03_data_passing_and_branching/02_variables_connections.py) | Đọc `Variable.get()` an toàn trong runtime của task và lấy thông tin connection qua `BaseHook.get_connection()`. |
-| [`03_branching_and_dynamic_tasks.py`](file:///c:/Users/Minh%20Doan/repo_github/Airflow/dags/03_data_passing_and_branching/03_branching_and_dynamic_tasks.py) | Dynamic Task Mapping qua `.expand()` để xử lý song song các vùng dữ liệu (Vietnam, Japan, Singapore, USA) kết hợp với `BranchPythonOperator` và `TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS`. |
+```mermaid
+graph TD
+    A["@task get_source_regions()"] --> B["@task.expand process_region_data[0..N]"]
+    B --> C["@task aggregate_results()"]
+    C --> D{"BranchPythonOperator: branch_decision"}
+    D -->|Sales >= 30k| E["send_slack_alert"]
+    D -->|Sales < 30k| F["send_email_alert (Skipped)"]
+    E --> G["join_branches (trigger_rule=NONE_FAILED_MIN_ONE_SUCCESS)"]
+    F -.->|Skipped Dependency| G
+```
 
 ---
 
-## ⚠️ Quy Tắc Vàng Khi Dùng XCom & Variables
+## 📂 Danh Sách Files & Chi Tiết Triển Khai
 
-| Thành Phần | Khuyên Dùng (Do's) | Cấm Kỵ (Don'ts) |
+| File | Mô Tả & Khái Niệm Chính | Điểm Cốt Lõi |
 | :--- | :--- | :--- |
-| **XCom** | Lưu ID, đường dẫn file S3/GCS/HDFS, số lượng dòng, trạng thái execution | Lưu nguyên DataFrame Pandas, File nhị phân, dữ liệu > 48KB |
-| **Variables** | Gọi bên trong hàm Python callable / execute method | Gọi ở Top-level script (gây overload database mỗi khi scheduler parse DAG) |
-| **Branching** | Thiết lập `trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS` cho task hội tụ sau nhánh | Dùng mặc định `all_success` ở node hội tụ vì các nhánh bị skip sẽ làm node sau fail |
+| [`01_xcom_data_sharing.py`](file:///c:/Users/Minh%20Doan/repo_github/Airflow/dags/03_data_passing_and_branching/01_xcom_data_sharing.py) | Đẩy và kéo dữ liệu qua `ti.xcom_push(key, value)` và `ti.xcom_pull(task_ids, key)`. Thể hiện mô hình Producer -> Consumer cho metadata & metrics. | Hạn chế payload kích thước lớn, ưu tiên lưu đường dẫn storage. |
+| [`02_variables_connections.py`](file:///c:/Users/Minh%20Doan/repo_github/Airflow/dags/03_data_passing_and_branching/02_variables_connections.py) | Đọc `Variable.get()` an toàn trong runtime của task và lấy thông tin connection qua `BaseHook.get_connection()`. | Hỗ trợ JSON deserialization và bảo vệ thông tin mật. |
+| [`03_branching_and_dynamic_tasks.py`](file:///c:/Users/Minh%20Doan/repo_github/Airflow/dags/03_data_passing_and_branching/03_branching_and_dynamic_tasks.py) | Dynamic Task Mapping qua `.expand()` để xử lý song song các vùng dữ liệu kết hợp với `BranchPythonOperator` và `TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS`. | Tránh lỗi cascading skipped state tại điểm hội tụ các luồng. |
+
+---
+
+## ⚡ Bảng Tra Cứu Các Trigger Rules Quan Trọng
+
+| Trigger Rule | Ý Nghĩa Kích Hoạt | Trường Hợp Sử Dụng Điển Hình |
+| :--- | :--- | :--- |
+| `all_success` *(Mặc định)* | Tất cả các task cha trực tiếp đều phải ở trạng thái `SUCCESS`. | Luồng pipeline tuần tự chuẩn. |
+| `none_failed_min_one_success` | Không có task cha nào bị `FAILED` và ít nhất một task cha `SUCCESS`. | Điểm hội tụ sau lệnh rẽ nhánh (`BranchPythonOperator`). |
+| `all_done` | Tất cả task cha đã kết thúc (dù `SUCCESS`, `FAILED` hay `SKIPPED`). | Task dọn dẹp tài nguyên (Cleanup / Tear Down). |
+| `one_success` | Chỉ cần ít nhất một task cha thành công là được chạy ngay. | Kích hoạt tác vụ dự phòng khẩn cấp (Failover). |
+| `all_failed` | Tất cả task cha đều bị lỗi. | Gửi thông báo sự cố toàn diện. |
 
 ---
 
@@ -44,5 +61,5 @@ python dags/03_data_passing_and_branching/03_branching_and_dynamic_tasks.py
 ### 2. Thiết lập Variable thử nghiệm qua CLI
 ```bash
 airflow variables set APP_ENVIRONMENT "production"
-airflow variables set API_RATE_LIMIT "250"
+airflow variables set PIPELINE_TUNING_CONFIG '{"batch_size": 2000, "rate_limit_per_sec": 100}'
 ```
